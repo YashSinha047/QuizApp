@@ -1,0 +1,5 @@
+{
+  "name": "QuizGenius AI",
+  "description": "A production-ready Quiz Management System featuring an Admin Panel for quiz creation (manual or AI-generated via Gemini) and a Public Portal for taking quizzes with instant results.",
+  "requestFramePermissions": []
+}

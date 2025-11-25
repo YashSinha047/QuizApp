@@ -1,0 +1,12 @@
+# ===== FRONTEND =====
+node_modules/
+.env
+.env.local
+.env.development
+.env.production
+build/
+dist/
+
+# ===== BACKEND (server folder) =====
+server/node_modules/
+server/.env
