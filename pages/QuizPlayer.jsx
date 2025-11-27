@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { apiService } from '../services/api.js';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -13,12 +13,25 @@ const QuizPlayer = () => {
   const [answers, setAnswers] = useState({}); 
   const [isFinished, setIsFinished] = useState(false);
   
+  // Timer State
+  const [timeLeft, setTimeLeft] = useState(10);
+  
   // Results
   const [score, setScore] = useState(0);
   const [maxScore, setMaxScore] = useState(0);
 
   const { user, isAdmin } = useAuth();
   const navigate = useNavigate();
+
+  // Helper function to shuffle array (Fisher-Yates)
+  const shuffleArray = (array) => {
+    const shuffled = [...array];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+  };
 
   useEffect(() => {
     // Protect route
@@ -31,6 +44,10 @@ const QuizPlayer = () => {
       if (!id) return;
       try {
         const data = await apiService.getQuizById(id);
+        if (data && data.questions) {
+            // Randomize questions on load
+            data.questions = shuffleArray(data.questions);
+        }
         setQuiz(data);
       } catch (err) {
         console.error(err);
@@ -41,18 +58,40 @@ const QuizPlayer = () => {
     fetch();
   }, [id, user, isAdmin, navigate]);
 
+  // Timer Logic
+  useEffect(() => {
+    if (!quiz || isFinished) return;
+
+    // Reset timer when question changes
+    setTimeLeft(10);
+
+    const timerId = setInterval(() => {
+      setTimeLeft((prevTime) => {
+        if (prevTime <= 1) {
+          clearInterval(timerId);
+          handleNext(true); // Pass true to indicate auto-advance
+          return 0;
+        }
+        return prevTime - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timerId);
+  }, [currentIndex, quiz, isFinished]);
+
   const handleSelectOption = (option) => {
     if (!quiz) return;
-    const currentQuestion = quiz.questions[currentIndex];
-    // using question index as key because ID might not be available in temporary state
+    // Store answer based on current index
     setAnswers(prev => ({
       ...prev,
       [currentIndex]: option
     }));
   };
 
-  const handleNext = () => {
+  const handleNext = (isAuto = false) => {
     if (!quiz) return;
+    
+    // Check if we are at the last question
     if (currentIndex < quiz.questions.length - 1) {
       setCurrentIndex(prev => prev + 1);
     } else {
@@ -68,6 +107,7 @@ const QuizPlayer = () => {
     quiz.questions.forEach((q, idx) => {
       const qPoints = q.points || 10;
       totalPoints += qPoints;
+      // If answers[idx] is undefined (due to timer runout), they get 0 points
       if (answers[idx] === q.correctAnswer) {
         earnedPoints += qPoints;
       }
@@ -128,11 +168,8 @@ const QuizPlayer = () => {
             </Link>
             <button
               onClick={() => {
-                setIsFinished(false);
-                setCurrentIndex(0);
-                setAnswers({});
-                setScore(0);
-                setMaxScore(0);
+                // To retake with new random order, we reload the data
+                window.location.reload();
               }}
               className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
             >
@@ -154,7 +191,7 @@ const QuizPlayer = () => {
                   </div>
                   <div className="text-sm space-y-1">
                     <p className={isCorrect ? "text-green-700 font-medium" : "text-red-600 line-through"}>
-                      Your Answer: {userAnswer || "(Skipped)"}
+                      Your Answer: {userAnswer || "(Time Up / Skipped)"}
                     </p>
                     {!isCorrect && (
                       <p className="text-green-700 font-medium">Correct Answer: {q.correctAnswer}</p>
@@ -172,6 +209,11 @@ const QuizPlayer = () => {
   const currentQuestion = quiz.questions[currentIndex];
   const progress = ((currentIndex + 1) / quiz.questions.length) * 100;
   const hasAnswered = !!answers[currentIndex];
+  
+  // Timer color logic
+  let timerColor = 'bg-green-500';
+  if (timeLeft <= 5) timerColor = 'bg-yellow-500';
+  if (timeLeft <= 3) timerColor = 'bg-red-500';
 
   return (
     <div className="max-w-3xl mx-auto space-y-8">
@@ -188,6 +230,24 @@ const QuizPlayer = () => {
             className="bg-indigo-600 h-2.5 rounded-full transition-all duration-300 ease-out" 
             style={{ width: `${progress}%` }}
           ></div>
+        </div>
+      </div>
+
+      {/* Timer Bar */}
+      <div className="relative pt-1">
+        <div className="flex mb-2 items-center justify-between">
+            <span className={`text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full ${timeLeft <= 3 ? 'text-red-600 bg-red-200' : 'text-indigo-600 bg-indigo-200'}`}>
+                Time Left
+            </span>
+            <span className={`text-sm font-bold ${timeLeft <= 3 ? 'text-red-600' : 'text-gray-700'}`}>
+                {timeLeft} seconds
+            </span>
+        </div>
+        <div className="overflow-hidden h-2 mb-4 text-xs flex rounded bg-gray-200">
+            <div 
+                style={{ width: `${(timeLeft / 10) * 100}%` }} 
+                className={`shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center ${timerColor} transition-all duration-1000 ease-linear`}
+            ></div>
         </div>
       </div>
 
@@ -241,13 +301,10 @@ const QuizPlayer = () => {
           </button>
           
           <button
-            onClick={handleNext}
-            disabled={!hasAnswered}
-            className={`px-6 py-2 rounded-md text-white font-medium shadow-sm transition-all ${
-              !hasAnswered
-                ? 'bg-gray-300 cursor-not-allowed'
-                : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-md'
-            }`}
+            onClick={() => handleNext(false)}
+            // Next is always enabled now because timer forces progress anyway, 
+            // but we can keep it clickable even if skipped to manually skip
+            className={`px-6 py-2 rounded-md text-white font-medium shadow-sm transition-all bg-indigo-600 hover:bg-indigo-700 hover:shadow-md`}
           >
             {currentIndex === quiz.questions.length - 1 ? 'Finish Quiz' : 'Next Question'}
           </button>
